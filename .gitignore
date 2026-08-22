@@ -1,3 +1,27 @@
-.idea
-venv
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.log
+
+# IDEs / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Antigravity IDE
+.gemini/
