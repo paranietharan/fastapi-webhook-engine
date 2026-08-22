@@ -44,4 +44,20 @@ uvicorn app.main:app --reload
 python -m app.worker.consumer
 ```
 
-Your API will be available at `http://127.0.0.1:8000`. You can test it by sending a JSON payload to `POST /api/v1/events`.
+## Sample request
+Health
+```bash
+curl --location 'localhost:8000/health'
+```
+
+```bash
+curl --location 'localhost:8000/api/v1/events' \
+--data '{
+    "event_type": "order.created",
+    "target_url": "<webhook_url>",
+    "payload": {
+        "order_id": 12345,
+        "amount": 99.99
+    }
+}'
+```
