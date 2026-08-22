@@ -10,7 +10,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Run your server
-uvicorn main:app --reload
+uvicorn app.main:app --reload
 ```
 
 ## DB Migrations
