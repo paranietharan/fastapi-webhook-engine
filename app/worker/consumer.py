@@ -27,7 +27,7 @@ async def main():
     async with httpx.AsyncClient(limits=limits) as http_client:
         async with queue.iterator() as queue_iter:
             async for message in queue_iter:
-                async with message.process(requeue=False):
+                async with message.process(requeue=False, ignore_processed=True):
                     payload_data = json.loads(message.body.decode("utf-8"))
                     delivery_id = uuid.UUID(payload_data["delivery_id"])
                     target_url = payload_data["target_url"]
@@ -45,7 +45,12 @@ async def main():
                     )
 
                     if not success_or_terminal:
-                        await handle_retry_or_dlq(channel, payload_data, attempt)
+                        try:
+                            await handle_retry_or_dlq(channel, payload_data, attempt)
+                        except Exception:
+                            # Keep the original delivery if publishing the retry failed.
+                            await message.nack(requeue=True)
+                            logger.exception("Retry publication failed; original delivery requeued")
 
 if __name__ == "__main__":
     asyncio.run(main())

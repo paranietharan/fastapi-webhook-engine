@@ -1,13 +1,17 @@
-import random
+"""Retry queues hold messages until RabbitMQ dead-letters them for delivery."""
 import json
 import aio_pika
 
+DELIVERY_QUEUE = "webhook_delivery_queue"
+DLQ = "webhook_dlq"
+
+
 def calculate_backoff_delay(attempt: int, base_delay: float = 2.0, max_delay: float = 300.0) -> int:
-    """Calculates exponential backoff with full jitter in milliseconds for AMQP TTL."""
-    exponential = min(max_delay, base_delay * (2 ** attempt))
-    jitter = random.uniform(0.5, 1.5)
-    delay_seconds = exponential * jitter
-    return int(delay_seconds * 1000) # Convert to ms for RabbitMQ
+    """Fixed, bounded milliseconds per attempt; all messages in a queue share a TTL."""
+    if attempt < 0 or base_delay <= 0 or max_delay <= 0:
+        raise ValueError("attempt must be nonnegative and delays must be positive")
+    return int(min(max_delay, base_delay * (2 ** min(attempt, 30))) * 1000)
+
 
 async def handle_retry_or_dlq(
     channel: aio_pika.RobustChannel,
@@ -15,22 +19,32 @@ async def handle_retry_or_dlq(
     attempt: int,
     max_attempts: int = 5,
 ):
+    if attempt < 0 or max_attempts < 1:
+        raise ValueError("invalid attempt limits")
     next_attempt = attempt + 1
-    message_data["attempt"] = next_attempt
-
+    payload = {**message_data, "attempt": next_attempt}
     if next_attempt >= max_attempts:
-        # Route to Dead Letter Queue
-        dlq_message = aio_pika.Message(
-            body=json.dumps(message_data).encode("utf-8"),
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-        )
-        await channel.default_exchange.publish(dlq_message, routing_key="webhook_dlq")
+        routing_key = DLQ
+        await channel.declare_queue(DLQ, durable=True)
     else:
-        # Re-publish back to delivery queue (or delayed exchange)
         delay_ms = calculate_backoff_delay(next_attempt)
-        retry_message = aio_pika.Message(
-            body=json.dumps(message_data).encode("utf-8"),
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            expiration=str(delay_ms), # Message TTL
+        # Separate queue per delay prevents short retries waiting behind longer ones.
+        routing_key = f"webhook_retry_{next_attempt}_{delay_ms}ms"
+        await channel.declare_queue(
+            routing_key,
+            durable=True,
+            arguments={
+                "x-message-ttl": delay_ms,
+                "x-dead-letter-exchange": "",
+                "x-dead-letter-routing-key": DELIVERY_QUEUE,
+            },
         )
-        await channel.default_exchange.publish(retry_message, routing_key="webhook_delivery_queue")
+    await channel.default_exchange.publish(
+        aio_pika.Message(
+            body=json.dumps(payload).encode("utf-8"),
+            content_type="application/json",
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        ),
+        routing_key=routing_key,
+        mandatory=True,
+    )
