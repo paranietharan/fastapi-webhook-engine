@@ -61,3 +61,13 @@ curl --location 'localhost:8000/api/v1/events' \
     }
 }'
 ```
+
+## Retry delivery and verification
+
+Retries use durable queues with a fixed queue-level TTL for each attempt. When the delay expires, RabbitMQ dead-letters the message back to `webhook_delivery_queue`. Consumers never consume retry queues. The same delivery ID is preserved; there are five attempts total (initial attempt 0, retries 1–4), then `webhook_dlq`. A failed retry publish requeues the original delivery.
+
+This is at-least-once processing, not exactly-once delivery. Receivers must deduplicate by delivery ID. Classic queue dead-letter forwarding is not an exactly-once or loss-free guarantee during broker failures; a quorum-queue migration requires separate validation. Do not delete retry queues containing pending messages during deployment.
+
+Use Python 3.12 and `pip install -r requirements-dev.txt`, then `python -m pytest`. Set `TEST_RABBITMQ_URL` only to an isolated test broker/vhost: the integration test purges its delivery and dead-letter queues. CI supplies a disposable broker and checks the real delay and DLQ path. Without the variable, that integration case is skipped.
+
+`requirements.in` and `requirements-dev.in` are direct constraints; their `.txt` files are resolved locks. Regenerate with `uv pip compile requirements.in --python-version 3.12 -o requirements.txt` and the corresponding dev command. Redis and aio-pika remain within their existing major versions.
